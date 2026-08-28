@@ -1431,12 +1431,50 @@ svg.leaflet-image-layer.leaflet-interactive path {
       });
     }
 
+    // Schools a few kilometres apart share one pixel when zoomed out: CMU and
+    // Pitt, Harvard and Northeastern, Columbia and NYU. Whichever was appended
+    // last covered the other and swallowed its clicks, so push overlapping
+    // markers apart far enough to stay separately visible and clickable. The
+    // nudge shrinks to nothing as you zoom in and real distance takes over.
+    const MIN_MARKER_GAP = 26;
+
+    function separateMarkers(placed) {
+      for (let pass = 0; pass < 12; pass++) {
+        let moved = false;
+        for (let i = 0; i < placed.length; i++) {
+          for (let j = i + 1; j < placed.length; j++) {
+            const a = placed[i], b = placed[j];
+            let dx = b.x - a.x, dy = b.y - a.y;
+            let distance = Math.hypot(dx, dy);
+            if (distance >= MIN_MARKER_GAP) continue;
+            if (distance < 0.01) {
+              // Exactly stacked: pick a fixed direction so it never jitters.
+              dx = (i + j) % 2 ? 1 : -1;
+              dy = (i * 7 + j) % 2 ? 1 : -1;
+              distance = Math.hypot(dx, dy);
+            }
+            const shift = (MIN_MARKER_GAP - distance) / 2;
+            const ux = dx / distance, uy = dy / distance;
+            a.x -= ux * shift; a.y -= uy * shift;
+            b.x += ux * shift; b.y += uy * shift;
+            moved = true;
+          }
+        }
+        if (!moved) break;
+      }
+    }
+
     function positionMarkers() {
+      const placed = [];
       entries.forEach(entry => {
         const point = map.latLngToLayerPoint([entry.record.lat, entry.record.lon]);
         entry.x = point.x;
         entry.y = point.y;
-        entry.element.style.transform = `translate3d(${point.x - 12}px, ${point.y - 12}px, 0)`;
+        if (entry.shown) placed.push(entry);
+      });
+      separateMarkers(placed);
+      entries.forEach(entry => {
+        entry.element.style.transform = `translate3d(${entry.x - 12}px, ${entry.y - 12}px, 0)`;
       });
     }
 
@@ -1507,12 +1545,8 @@ svg.leaflet-image-layer.leaflet-interactive path {
         const clear = other => other.owner !== entry;
         let spot = boxes.find(box => !taken.some(other => clear(other) && overlaps(box, other)));
 
-        // Interchange schools are the point of this map, so if nothing is clear
-        // they may sit over a marker — but never over another label.
-        if (!spot && record.both) {
-          spot = boxes.find(box =>
-            !taken.some(other => clear(other) && other.kind !== "marker" && overlaps(box, other)));
-        }
+        // No marker-overlap fallback: a label parked on someone else's dot also
+        // steals its clicks, and markers are spread apart now, so labels fit.
 
         if (!spot) {
           entry.label.classList.remove("is-visible");
